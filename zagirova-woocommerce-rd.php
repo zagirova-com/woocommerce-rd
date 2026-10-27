@@ -2,7 +2,7 @@
 /**
  * Plugin Name: WooCommerce RD (Zagirova)
  * Description: Lo que una tienda WooCommerce en República Dominicana necesita en el checkout: campo de RNC o cédula con dígito verificador, tipo de comprobante (consumo o crédito fiscal), teléfono con código de área dominicano y ITBIS al 18 %. Sin dependencias.
- * Version: 1.0.0
+ * Version: 1.0.1
  * Author: Zagirova
  * Author URI: https://zagirova.com
  * License: MIT
@@ -10,6 +10,13 @@
  */
 
 if (!defined('ABSPATH')) exit;
+
+/* Compatible con el almacenamiento de pedidos en tablas propias (HPOS), que es el predeterminado desde WooCommerce 8.2. */
+add_action('before_woocommerce_init', function () {
+    if (class_exists(\Automattic\WooCommerce\Utilities\FeaturesUtil::class)) {
+        \Automattic\WooCommerce\Utilities\FeaturesUtil::declare_compatibility('custom_order_tables', __FILE__, true);
+    }
+});
 
 /* ---------- Validación de formato (misma regla que github.com/zagirova/validadores-rd) ---------- */
 
@@ -86,20 +93,20 @@ add_action('woocommerce_checkout_process', function () {
     }
 });
 
-add_action('woocommerce_checkout_update_order_meta', function ($order_id) {
-    if (!empty($_POST['billing_rnc'])) update_post_meta($order_id, '_billing_rnc', zrd_limpiar(wc_clean(wp_unslash($_POST['billing_rnc']))));
-    if (!empty($_POST['billing_comprobante'])) update_post_meta($order_id, '_billing_comprobante', wc_clean(wp_unslash($_POST['billing_comprobante'])));
-    if (!empty($_POST['billing_phone'])) { $t = zrd_telefono(wc_clean(wp_unslash($_POST['billing_phone']))); if ($t) update_post_meta($order_id, '_billing_phone_e164', $t); }
-});
+add_action('woocommerce_checkout_create_order', function ($order, $data) {
+    if (!empty($_POST['billing_rnc'])) $order->update_meta_data('_billing_rnc', zrd_limpiar(wc_clean(wp_unslash($_POST['billing_rnc']))));
+    if (!empty($_POST['billing_comprobante'])) $order->update_meta_data('_billing_comprobante', wc_clean(wp_unslash($_POST['billing_comprobante'])));
+    if (!empty($_POST['billing_phone'])) { $t = zrd_telefono(wc_clean(wp_unslash($_POST['billing_phone']))); if ($t) $order->update_meta_data('_billing_phone_e164', $t); }
+}, 10, 2);
 
 /* El RNC y el tipo de comprobante en el panel del pedido y en los correos. */
 add_action('woocommerce_admin_order_data_after_billing_address', function ($order) {
-    $rnc = get_post_meta($order->get_id(), '_billing_rnc', true); $tipo = get_post_meta($order->get_id(), '_billing_comprobante', true);
+    $rnc = $order->get_meta('_billing_rnc'); $tipo = $order->get_meta('_billing_comprobante');
     if ($rnc) echo '<p><strong>RNC o cédula:</strong> ' . esc_html($rnc) . '</p>';
     if ($tipo) echo '<p><strong>Comprobante:</strong> ' . esc_html($tipo === 'credito' ? 'Crédito fiscal (B01 / E31)' : 'Consumo (B02 / E32)') . '</p>';
 });
 add_filter('woocommerce_email_order_meta_fields', function ($fields, $sent_to_admin, $order) {
-    $rnc = get_post_meta($order->get_id(), '_billing_rnc', true);
+    $rnc = $order->get_meta('_billing_rnc');
     if ($rnc) $fields['billing_rnc'] = ['label' => 'RNC o cédula', 'value' => $rnc];
     return $fields;
 }, 10, 3);
